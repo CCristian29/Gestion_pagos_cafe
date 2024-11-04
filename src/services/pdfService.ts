@@ -2,27 +2,51 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { createRoot } from 'react-dom/client';
 import React from 'react';
-import { Receipt } from '../components/Receipt';
-import { SummaryReceipt } from '../components/SummaryReceipt';
+
+const PDF_CONFIG = {
+  format: 'a4',
+  unit: 'mm',
+  orientation: 'portrait',
+  compress: true
+};
+
+const CANVAS_CONFIG = {
+  scale: 2,
+  useCORS: true,
+  logging: false,
+  allowTaint: true,
+  letterRendering: true,
+  imageTimeout: 0,
+  removeContainer: true,
+  backgroundColor: '#ffffff'
+};
 
 const generatePDF = async (element: HTMLElement, filename: string) => {
-  const canvas = await html2canvas(element, {
-    scale: 2,
-    useCORS: true,
-    logging: false
-  });
+  const canvas = await html2canvas(element, CANVAS_CONFIG);
   
-  const imgData = canvas.toDataURL('image/png');
-  const pdf = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4'
-  });
+  const pdf = new jsPDF(PDF_CONFIG);
 
-  const imgWidth = 210; // A4 width in mm
-  const imgHeight = (canvas.height * imgWidth) / canvas.width;
+  // Calculate dimensions to fit A4
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const aspectRatio = canvas.height / canvas.width;
   
-  pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+  // Set optimal width while maintaining aspect ratio
+  const imgWidth = pageWidth - 20; // 10mm margins
+  const imgHeight = imgWidth * aspectRatio;
+  
+  // Convert canvas to compressed JPEG for smaller file size
+  const imgData = canvas.toDataURL('image/jpeg', 0.8);
+  
+  // Add image centered on page with compression
+  pdf.addImage(imgData, 'JPEG', 10, 10, imgWidth, imgHeight, undefined, 'FAST');
+  
+  // Enable maximum compression
+  pdf.setProperties({
+    compression: true,
+    compressPdf: true
+  });
+  
   pdf.save(filename);
 };
 
@@ -30,29 +54,28 @@ export const printToPDF = async (
   Component: React.ComponentType<any>,
   props: any,
   filename: string
-) => {
-  // Create a temporary container
+): Promise<void> => {
+  // Create a temporary container with specific dimensions for better PDF quality
   const container = document.createElement('div');
   container.style.position = 'absolute';
   container.style.left = '-9999px';
+  container.style.width = '595px'; // A4 width at 72 DPI
   document.body.appendChild(container);
 
-  // Render the component
-  const root = createRoot(container);
-  await new Promise<void>((resolve) => {
-    root.render(
-      React.createElement('div', 
-        { style: { width: '800px', backgroundColor: 'white' } },
-        React.createElement(Component, props)
-      )
-    );
-    setTimeout(resolve, 100); // Wait for render
-  });
+  try {
+    const root = createRoot(container);
+    await new Promise<void>((resolve) => {
+      root.render(
+        React.createElement('div', 
+          { style: { backgroundColor: 'white', padding: '20px', width: '100%' } },
+          React.createElement(Component, props)
+        )
+      );
+      setTimeout(resolve, 100);
+    });
 
-  // Generate PDF
-  await generatePDF(container, filename);
-
-  // Cleanup
-  document.body.removeChild(container);
-  root.unmount();
+    await generatePDF(container, filename);
+  } finally {
+    document.body.removeChild(container);
+  }
 };
